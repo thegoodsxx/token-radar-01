@@ -1,4 +1,6 @@
 
+// Token Radar Dashboard (Round 4 Hybrid: v3 presentation on v2 model outputs)
+// Static client-side application. Consumes window.RADAR from data.js.
 (function () {
  'use strict';
  var DATA = window.RADAR;
@@ -149,8 +151,10 @@
     bv = b.change_7d === null ? -Infinity : b.change_7d;
    } else if (key === 'multiple') {
     av = a.peer_multiple; bv = b.peer_multiple;
-   } else if (key === 'conviction') {
-    av = a.conviction_score || 0; bv = b.conviction_score || 0;
+   } else if (key === 'peer_rel') {
+    var relA = a.category_median > 0 ? (a.peer_multiple - a.category_median) / a.category_median : 0;
+    var relB = b.category_median > 0 ? (b.peer_multiple - b.category_median) / b.category_median : 0;
+    av = relA; bv = relB;
    } else if (key === 'age') {
     av = a.age_days === null ? -1 : a.age_days;
     bv = b.age_days === null ? -1 : b.age_days;
@@ -443,8 +447,7 @@
       el('div', { class: 'protocol-main' },
        el('span', { class: 'protocol-name', text: r.name }),
        r.is_watchlist ? el('span', { class: 'watchlist-badge', text: 'Watchlist' }) : null,
-       r.is_long_shot ? el('span', { class: 'longshot-badge', text: 'LONG SHOT', title: r.long_shot_reason || 'Long shot protocol' }) : null,
-       r.is_outlier ? el('span', { class: 'outlier-badge', text: 'OUTLIER', title: r.outlier_reason || 'Category concentration outlier' }) : null
+       r.launch_plausibility_factor < 1.0 ? el('span', { class: 'longshot-badge', text: 'LONG SHOT', title: (r.model_note && r.model_note.indexOf('; ') >= 0 ? r.model_note.split('; ')[1] : 'Discounted long shot (wrapped/bridged/exchange lineage)') }) : null
       ),
       el('span', { class: 'protocol-slug', text: r.slug })
      )
@@ -464,14 +467,28 @@
     el('td', { class: 'num-col multiple-cell' },
      el('div', { class: 'multiple-stack' },
       el('span', { class: 'val-mono accent-subtle', text: r.peer_multiple.toFixed(2) + 'x' }),
-      el('span', { class: 'dispersion-tag', text: 'IQR ' + (r.peer_dispersion !== undefined ? r.peer_dispersion.toFixed(2) : '0.00'), title: 'Peer cohort dispersion (IQR)' })
+      el('span', { class: 'peer-ref-tag', text: (r.category_peers_count > 0 ? 'cat ' + r.category_median.toFixed(2) + 'x' : 'global ref'), title: 'Raw category median ' + r.category_median.toFixed(3) + 'x (n=' + r.category_peers_count + ')' })
      )
     ),
-    el('td', { class: 'num-col conviction-cell' },
-     el('div', { class: 'conviction-container' },
-      el('span', { class: 'conviction-badge ' + (r.conviction_score >= 70 ? 'conv-high' : (r.conviction_score >= 45 ? 'conv-med' : 'conv-low')), text: String(r.conviction_score || 50) }),
-      el('span', { class: 'conviction-sub', text: '/100' })
-     )
+    el('td', { class: 'num-col peer-rel-cell' },
+     (function () {
+      if (!r.category_median || r.category_median <= 0) {
+       return el('div', { class: 'peer-rel-container' },
+        el('span', { class: 'peer-rel-badge rel-neutral', text: 'par' })
+       );
+      }
+      var diffPct = ((r.peer_multiple - r.category_median) / r.category_median) * 100;
+      var isPrem = diffPct >= 0.5;
+      var isDisc = diffPct <= -0.5;
+      var badgeClass = isPrem ? 'rel-prem' : (isDisc ? 'rel-disc' : 'rel-neutral');
+      var sign = diffPct > 0 ? '+' : '';
+      var text = (isPrem || isDisc) ? sign + Math.round(diffPct) + '%' : 'par';
+      var sub = isPrem ? 'prem' : (isDisc ? 'disc' : 'vs cat');
+      return el('div', { class: 'peer-rel-container' },
+       el('span', { class: 'peer-rel-badge ' + badgeClass, text: text, title: (isPrem ? 'Premium' : (isDisc ? 'Discount' : 'Par')) + ' vs ' + (r.category || 'category') + ' median (' + r.category_median.toFixed(3) + 'x)' }),
+       el('span', { class: 'peer-rel-sub', text: sub })
+      );
+     })()
     ),
     el('td', { class: 'num-col implied-cell' },
      el('div', { class: 'implied-container' },
@@ -497,8 +514,8 @@
       el('th', { scope: 'col', class: 'plain-col' }, 'Chains'),
       sortHeader('tvl', 'TVL (USD)', true),
       sortHeader('growth', '7d Change', true),
-      sortHeader('multiple', 'Multiple & IQR', true),
-      sortHeader('conviction', 'Conviction', true),
+      sortHeader('multiple', 'Multiple M(P)', true),
+      sortHeader('peer_rel', 'vs Cat Peers', true),
       sortHeader('implied', 'Implied Value', true)
      )
     ),
@@ -564,17 +581,17 @@
    el('details', { class: 'methodology-panel', id: 'methodology-panel' },
     el('summary', { class: 'methodology-summary' },
      el('div', { class: 'methodology-summary-text' },
-      el('span', { class: 'methodology-badge', text: 'Model v3 Specification' }),
+      el('span', { class: 'methodology-badge', text: 'Model v2 Specification (Round 4 Hybrid)' }),
       el('h2', { class: 'methodology-heading', text: 'Methodology & Model Limits' }),
-      el('span', { class: 'methodology-toggle-hint', text: 'Click to expand valuation method, Bayesian shrinkage, plausibility rules & sanity layer limits ▸' })
+      el('span', { class: 'methodology-toggle-hint', text: 'Click to expand valuation method, Bayesian shrinkage, plausibility rules & model limits ▸' })
      )
     ),
     el('div', { class: 'methodology-grid' },
      [
-      ['01. Similarity-Weighted Multiples', 'Replaces crude medians with distance-weighted peer multiples: category peers are weighted by log TVL proximity (w_tvl = 1 / (1 + 0.5·ΔlogTVL)) and chain overlap Jaccard (w_chain = 1 + J). Peer ratios capped at 3.0x to eliminate outlier distortion.'],
-      ['02. Bayesian Shrinkage & Caps', 'Empirical Bayes shrinkage pulls small cohorts toward category median (and global ' + DATA.global_median_multiple.toFixed(3) + 'x) via prior weighting 4. Multiples capped at 3.0x ceiling. Peer agreement measured via Interquartile Range (IQR = Q3 - Q1).'],
-      ['03. Plausibility & Conviction Score', '0.10x structural factor applies to bridge protocols, CEXs, and wrapped/staked derivatives with existing token lineage. Explicit 0-100 conviction score synthesizes upside, agreement (1/(1+IQR)), 7d growth, and seasoning.'],
-      ['04. Sanity Layer & Known Limits', 'Flags category concentration outliers (>45% share of multi-protocol categories). Model derives from snapshot-frozen TVL (not live order-book depth) and cannot observe off-chain private equity or tokenomic lockups.']
+      ['01. Category-Median Peer Multiples', 'Peer multiple M(P) derives from the median Mcap/TVL ratio of tokenized protocols in each DefiLlama category. Thin cohorts are shrunk toward the global tokenized median (' + DATA.global_median_multiple.toFixed(3) + 'x) via Empirical Bayes prior weighting (weight 6): M = (n·M_cat + 6·M_global) / (n + 6). Capped at a conservative 3.0x ceiling to eliminate thin-cohort crediting.'],
+      ['02. Multi-Factor Adjustment Stack', 'Base valuation B = TVL × M(P). Four empirical factors adjust base value: 7d TVL momentum f_mom = clamp(1 + Δ7d/100, 0.5, 2.0); seasoning f_age = 1 + 0.25·min(age_days, 1460)/1460 (up to +25% at 4y); chain breadth f_chain = 1 + 0.05·min(chains-1, 6) (up to +30% at 7+ chains); and structural plausibility f_plaus.'],
+      ['03. Structural Launch Plausibility & Long Shots', '0.10x discount factor applies to wrapped, bridged, liquid restaking, CEX-branded, and derivative pools with existing token lineage. Rather than silently dropping them, the model prices them realistically as LONG SHOTs with full on-chain farm playbooks and explicit rationale.'],
+      ['04. Ranking Formulation & Model Limits', 'Protocols are ranked by implied USD valuation (implied = round(B · f_mom · f_age · f_chain · f_plaus)). The model derives strictly from snapshot TVL metrics (not order-book depth or OTC pricing) and cannot observe private equity cap tables, vesting schedules, or off-chain foundation reserves.']
      ].map(function (m) {
       return el('div', { class: 'methodology-card' },
        el('h3', { class: 'methodology-card-title', text: m[0] }),
@@ -599,7 +616,7 @@
    ),
    el('div', { class: 'explainer-grid' },
     [
-     ['01', 'Similarity Multiple M(P)', 'Peers in same category weighted by log TVL distance and chain overlap Jaccard, shrunk via Bayes prior 4, capped at 3.0x ceiling.'],
+     ['01', 'Peer Multiple M(P) (Capped at 3.0x)', 'Category median mcap/TVL of tokenized peers shrunk toward global median (' + DATA.global_median_multiple.toFixed(3) + 'x) via Bayesian prior weighting 6: M = (n·M_cat + 6·M_global) / (n + 6). Capped at 3.0x ceiling.'],
      ['02', 'Base Valuation', 'Base value B = TVL × M(P). Locked capital scaled by empirical category multiples.'],
      ['03', 'Momentum Factor', '7d growth factor f_mom = clamp(1 + change_7d / 100, 0.5, 2.0). Bounded weekly delta.'],
      ['04', 'Seasoning Factor', 'Longevity factor f_age = 1 + 0.25 × min(age_days, 1460) / 1460. Up to +25% survival premium for 4-year track record.'],
@@ -615,7 +632,7 @@
     })
    ),
    el('div', { class: 'category-multiples-card' },
-    el('h3', { class: 'cat-title', text: 'Live Category Valuation Benchmarks (Empirical Multiples & Dispersion)' }),
+    el('h3', { class: 'cat-title', text: 'Live Category Valuation Benchmarks (Empirical Multiples)' }),
     el('p', { class: 'cat-intro', text: 'Derived directly from 30 live-token peers in this snapshot. Shrunk toward global median (' + DATA.global_median_multiple.toFixed(3) + 'x) via Bayesian weighting; capped at 3.0x ceiling.' }),
     el('div', { class: 'cat-table-wrap' },
      el('table', { class: 'cat-median-table' },
@@ -624,7 +641,6 @@
         el('th', { scope: 'col', class: 'plain-col' }, 'Category'),
         el('th', { scope: 'col', class: 'num-col' }, 'Peers (n)'),
         el('th', { scope: 'col', class: 'num-col' }, 'Category Median'),
-        el('th', { scope: 'col', class: 'num-col' }, 'IQR Dispersion'),
         el('th', { scope: 'col', class: 'num-col' }, 'Effective Multiple M(P)')
        )
       ),
@@ -634,7 +650,6 @@
          el('td', { class: 'cat-name-cell' }, item.cat),
          el('td', { class: 'num-col' }, 'n=' + item.data.n),
          el('td', { class: 'num-col val-mono' }, item.data.median.toFixed(3) + 'x'),
-         el('td', { class: 'num-col val-mono' }, (item.data.dispersion !== undefined ? item.data.dispersion.toFixed(3) : '0.000') + 'x'),
          el('td', { class: 'num-col val-mono accent-bright' }, item.data.multiple.toFixed(3) + 'x' + (item.data.multiple >= 3 ? ' (cap)' : ''))
         );
        })
@@ -666,8 +681,7 @@
     el('div', { class: 'modal-badges' },
      el('span', { class: 'rank-pill', text: 'Rank #' + row.rank + ' of ' + DATA.board_size }),
      row.is_watchlist ? el('span', { class: 'watchlist-pill', text: 'Watchlist Protocol' }) : null,
-     row.is_long_shot ? el('span', { class: 'longshot-pill', text: 'LONG SHOT: ' + (row.long_shot_reason || 'Discounted') }) : null,
-     row.is_outlier ? el('span', { class: 'outlier-pill', text: 'OUTLIER: ' + (row.outlier_reason || 'Concentration') }) : null,
+     row.launch_plausibility_factor < 1.0 ? el('span', { class: 'longshot-pill', text: 'LONG SHOT: ' + (row.model_note && row.model_note.indexOf('; ') >= 0 ? row.model_note.split('; ')[1] : 'Discounted long shot') }) : null,
      el('span', { class: 'token-status-pill', text: 'Records No Token' })
     ),
     el('h2', { id: 'detail-modal-title', class: 'modal-title', text: row.name }),
@@ -686,8 +700,8 @@
     ['Implied Valuation', fmtUsdExact(row.implied_value_usd), fmtUsd(row.implied_value_usd) + ' model total', 'accent-bright'],
     ['Total Value Locked', fmtUsdExact(row.tvl_usd), fmtUsd(row.tvl_usd) + ' on-chain', ''],
     ['7-Day TVL Change', fmtPct(row.change_7d), 'Trailing week delta', (row.change_7d !== null && row.change_7d >= 0 ? 'pos-change' : 'neg-change')],
-    ['Conviction Score', (row.conviction_score || 50) + ' / 100', (row.conviction_score >= 70 ? 'High' : (row.conviction_score >= 45 ? 'Moderate' : 'Low')) + ' model conviction', (row.conviction_score >= 70 ? 'pos-change' : (row.conviction_score >= 45 ? 'accent-subtle' : 'neg-change'))],
-    ['Peer Cohort Dispersion', 'IQR ' + (row.peer_dispersion !== undefined ? row.peer_dispersion.toFixed(2) : '0.00'), (row.category || 'Category') + ' multiple spread', ''],
+    ['Peer Multiple M(P)', row.peer_multiple.toFixed(3) + 'x', (row.peer_multiple >= 3.0 ? 'Capped at 3.0x' : 'Effective valuation multiple'), (row.peer_multiple >= 3.0 ? 'accent-bright' : 'accent-subtle')],
+    ['vs Category Peers', (row.category_median > 0 ? ((row.peer_multiple >= row.category_median ? '+' : '') + (((row.peer_multiple - row.category_median) / row.category_median) * 100).toFixed(1) + '%') : 'Par'), (row.category_median > 0 ? (row.peer_multiple >= row.category_median ? 'Premium to ' : 'Discount to ') + (row.category || 'Category') + ' median (' + row.category_median.toFixed(3) + 'x)' : 'Global benchmark'), (row.peer_multiple >= (row.category_median || 0) ? 'pos-change' : 'accent-subtle')],
     ['Age with No Token', fmtAge(row.age_days), (row.age_days || 0) + ' days tracked', '']
    ].map(function (fig) {
     return el('div', { class: 'fig-item' },
@@ -699,7 +713,6 @@
   );
   var factorItems = [
    ['Peer Multiple M(P)', 'vs 3.0x cap', row.peer_multiple.toFixed(3) + 'x', Math.min(100, Math.max(4, Math.round(row.peer_multiple / 3 * 100))), row.peer_multiple >= 3 ? 'bar-gold' : 'bar-signal'],
-   ['Peer Dispersion (IQR)', (row.category || 'Category') + ' spread', (row.peer_dispersion !== undefined ? row.peer_dispersion.toFixed(2) : '0.00') + 'x', Math.min(100, Math.max(4, Math.round(100 / (1 + (row.peer_dispersion || 0))))), 'bar-signal'],
    ['Momentum Factor', fmtPct(row.change_7d), row.momentum_factor.toFixed(2) + 'x', Math.min(100, Math.max(4, Math.round((row.momentum_factor - 0.5) / 1.5 * 100))), row.momentum_factor >= 1 ? 'bar-pos' : 'bar-neg'],
    ['Seasoning Factor', fmtAge(row.age_days), row.seasoning_factor.toFixed(2) + 'x', Math.min(100, Math.max(4, Math.round(row.seasoning_factor / 1.25 * 100))), 'bar-signal'],
    ['Chain Breadth', (row.chains ? row.chains.length : 1) + ' chain(s)', row.breadth_factor.toFixed(2) + 'x', Math.min(100, Math.max(4, Math.round(row.breadth_factor / 1.3 * 100))), 'bar-signal'],
@@ -724,14 +737,13 @@
    factorBarsEl,
    el('div', { class: 'breakdown-box' },
     [
-     ['Peer Multiple M(P)', row.peer_multiple.toFixed(3) + 'x', (row.category || 'Category') + ' peer weighted (' + row.category_median.toFixed(3) + 'x, n=' + row.category_peers_count + ')' + (row.peer_multiple >= 3 ? ' [Capped 3.0x]' : ''), 'accent-bright'],
-     ['Cohort Dispersion', (row.peer_dispersion !== undefined ? row.peer_dispersion.toFixed(3) : '0.000') + 'x', 'Peer IQR (Q3 - Q1)', ''],
-     ['Conviction Score', (row.conviction_score || 50) + '/100', 'Synthesizes multiple, agreement, momentum, seasoning', (row.conviction_score >= 70 ? 'accent-bright' : '')],
+     ['Peer Multiple M(P)', row.peer_multiple.toFixed(3) + 'x', (row.category || 'Category') + ' median (' + row.category_median.toFixed(3) + 'x, n=' + row.category_peers_count + ') shrunk to global (' + DATA.global_median_multiple.toFixed(3) + 'x)' + (row.peer_multiple >= 3 ? ' [Capped at 3.0x max ceiling]' : ''), 'accent-bright'],
+     ['Category Bias', (row.category_median > 0 ? (((row.peer_multiple >= row.category_median ? '+' : '') + (((row.peer_multiple - row.category_median) / row.category_median) * 100).toFixed(1) + '% ') + (row.peer_multiple >= row.category_median ? 'premium' : 'discount')) : 'par'), 'Relative to raw ' + (row.category || 'cohort') + ' median', ''],
      ['Base Value', fmtUsd(row.tvl_usd * row.peer_multiple), fmtUsd(row.tvl_usd) + ' TVL × ' + row.peer_multiple.toFixed(3) + 'x', ''],
      ['Momentum (f_mom)', row.momentum_factor.toFixed(2) + 'x', '7d change ' + fmtPct(row.change_7d), ''],
      ['Seasoning (f_age)', row.seasoning_factor.toFixed(2) + 'x', 'Longevity multiplier (' + (row.age_days || 0) + 'd)', ''],
      ['Chain Breadth', row.breadth_factor.toFixed(2) + 'x', (row.chains ? row.chains.length : 1) + ' chain(s)', ''],
-     ['Plausibility', row.launch_plausibility_factor.toFixed(2) + 'x', row.launch_plausibility_factor < 1 ? '0.10x (' + (row.long_shot_reason || 'discounted') + ')' : '1.00x primary', row.launch_plausibility_factor < 1 ? 'neg-change' : 'accent-bright']
+     ['Plausibility', row.launch_plausibility_factor.toFixed(2) + 'x', row.launch_plausibility_factor < 1 ? '0.10x (' + (row.model_note && row.model_note.indexOf('; ') >= 0 ? row.model_note.split('; ')[1] : 'discounted long shot') + ')' : '1.00x primary primitive', row.launch_plausibility_factor < 1 ? 'neg-change' : 'accent-bright']
     ].map(function (b) {
      return el('div', { class: 'breakdown-row' },
       el('span', { class: 'br-name', text: b[0] }),
@@ -739,13 +751,9 @@
       el('span', { class: 'br-desc', text: b[2] })
      );
     }),
-    row.is_long_shot ? el('div', { class: 'longshot-reason-callout' },
+    row.launch_plausibility_factor < 1.0 ? el('div', { class: 'longshot-reason-callout' },
      el('b', { text: 'LONG SHOT Rationale: ' }),
-     row.long_shot_reason
-    ) : null,
-    row.is_outlier ? el('div', { class: 'outlier-reason-callout' },
-     el('b', { text: 'Sanity Layer Alert: ' }),
-     row.outlier_reason
+     (row.model_note && row.model_note.indexOf('; ') >= 0 ? row.model_note.split('; ')[1] : 'Wrapped/bridged/exchange-affiliated lineage discounted to 0.10x')
     ) : null,
     el('div', { class: 'model-note-callout' },
      el('span', { class: 'note-tag', text: 'Model Summary:' }),
