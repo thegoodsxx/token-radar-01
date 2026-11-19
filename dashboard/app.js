@@ -629,8 +629,8 @@
       el('div', { class: 'explainer-grid' },
         el('div', { class: 'explainer-card' },
           el('div', { class: 'step-num', text: '01' }),
-          el('h3', { text: 'Peer Multiple M(P)' }),
-          el('p', { text: 'Category median mcap/TVL of tokenized peers shrunk toward the global median (' + DATA.global_median_multiple.toFixed(3) + 'x) via Bayesian prior weighting 6: M = (n·M_cat + 6·M_global) / (n + 6).' })
+          el('h3', { text: 'Peer Multiple M(P) (Capped at 3.0x)' }),
+          el('p', { text: 'Category median mcap/TVL of tokenized peers shrunk toward the global median (' + DATA.global_median_multiple.toFixed(3) + 'x) via Bayesian prior weighting 6: M = (n·M_cat + 6·M_global) / (n + 6). Capped at 3.0x: no launch multiple above 3x TVL is credited, because beyond that the peer set is too thin to believe.' })
         ),
         el('div', { class: 'explainer-card' },
           el('div', { class: 'step-num', text: '02' }),
@@ -654,8 +654,13 @@
         ),
         el('div', { class: 'explainer-card' },
           el('div', { class: 'step-num', text: '06' }),
+          el('h3', { text: 'Launch Plausibility' }),
+          el('p', { text: 'Structural factor mirroring house watchlist logic: 0.10x for wrapped, bridged, liquid-staked, or exchange-affiliated products with existing token lineage; 1.00x for primary pre-token protocol primitives.' })
+        ),
+        el('div', { class: 'explainer-card' },
+          el('div', { class: 'step-num', text: '07' }),
           el('h3', { text: 'Implied Valuation' }),
-          el('p', { text: 'implied = round(B × f_mom × f_age × f_chain) in whole USD (minimum $1). Every row is computed deterministically at runtime.' })
+          el('p', { text: 'implied = round(B × f_mom × f_age × f_chain × f_plaus) in whole USD (minimum $1). Every row is computed deterministically at runtime.' })
         )
       ),
       el('div', { class: 'category-multiples-card' },
@@ -747,7 +752,7 @@
         el('div', { class: 'breakdown-row' },
           el('span', { class: 'br-name', text: 'Peer Multiple M(P)' }),
           el('span', { class: 'br-val val-mono accent-bright', text: row.peer_multiple.toFixed(3) + 'x' }),
-          el('span', { class: 'br-desc', text: (row.category || 'Category') + ' median (' + row.category_median.toFixed(3) + 'x, n=' + row.category_peers_count + ') shrunk to global (' + DATA.global_median_multiple.toFixed(3) + 'x)' })
+          el('span', { class: 'br-desc', text: (row.category || 'Category') + ' median (' + row.category_median.toFixed(3) + 'x, n=' + row.category_peers_count + ') shrunk to global (' + DATA.global_median_multiple.toFixed(3) + 'x)' + (row.peer_multiple >= 3.0 ? ' [Capped at 3.0x max ceiling]' : '') })
         ),
         el('div', { class: 'breakdown-row' },
           el('span', { class: 'br-name', text: 'Base Value (TVL × M)' }),
@@ -768,6 +773,11 @@
           el('span', { class: 'br-name', text: 'Chain Breadth Factor (f_chain)' }),
           el('span', { class: 'br-val val-mono', text: row.breadth_factor.toFixed(2) + 'x' }),
           el('span', { class: 'br-desc', text: (row.chains ? row.chains.length : 1) + ' active deployment chain(s)' })
+        ),
+        el('div', { class: 'breakdown-row' },
+          el('span', { class: 'br-name', text: 'Launch Plausibility (f_plaus)' }),
+          el('span', { class: 'br-val val-mono' + (row.launch_plausibility_factor < 1.0 ? ' neg-change' : ' accent-bright'), text: row.launch_plausibility_factor.toFixed(2) + 'x' }),
+          el('span', { class: 'br-desc', text: row.launch_plausibility_factor < 1.0 ? '0.10x long-shot factor (wrapped, bridged, or exchange lineage)' : '1.00x full plausibility (primary pre-token protocol)' })
         ),
         el('div', { class: 'model-note-callout' },
           el('span', { class: 'note-tag', text: 'Model Summary:' }),

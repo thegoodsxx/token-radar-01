@@ -15,8 +15,8 @@ Token Radar scans the frozen DefiLlama protocol universe, isolates all **342 pro
 Unlike static aggregators or raw TVL tables, Token Radar computes valuations dynamically from the snapshot's own figures at runtime:
 
 1. **Peer Multiple $M(P)$**: The runtime median market-cap to TVL ratio of tokenized peers in the protocol's category. To prevent small samples from distorting valuations, Empirical Bayes shrinkage pulls small category cohorts toward the global peer median ($M_{\text{global}} \approx 0.205\text{x}$):
-   $$M(P) = \frac{n \cdot M_{\text{cat}} + 6 \cdot M_{\text{global}}}{n + 6}$$
-   *(Falls back to $M_{\text{global}}$ when category is null or $n = 0$.)*
+   $$M(P) = \min\left(3.0,\ \frac{n \cdot M_{\text{cat}} + 6 \cdot M_{\text{global}}}{n + 6}\right)$$
+   *(Capped at 3.0x max ceiling to prevent thin peer sets from over-crediting; falls back to $M_{\text{global}}$ when category is null or $n = 0$.)*
 2. **Base Valuation $B$**: Grounded in verifiable on-chain capital scaled by peer valuation multiples:
    $$B = \text{tvl\_usd} \times M(P)$$
 3. **Momentum Factor $f_{\text{mom}}$**: Derived from 7-day TVL percentage change, bounded so single-week volatility cannot dominate:
@@ -25,8 +25,9 @@ Unlike static aggregators or raw TVL tables, Token Radar computes valuations dyn
    $$f_{\text{age}} = 1 + 0.25 \times \frac{\min(\text{age\_days},\ 1460)}{1460} \quad (\text{up to } +25\% \text{ at } 4 \text{ years})$$
 5. **Chain Breadth Factor $f_{\text{chain}}$**: Scaling factor rewarding broad cross-chain deployment:
    $$f_{\text{chain}} = 1 + 0.05 \times \min(\text{len}(\text{chains}) - 1,\ 6) \quad (\text{up to } +30\% \text{ at } 7+ \text{ chains})$$
-6. **Implied Valuation**:
-   $$\text{implied} = \max\left(1,\ \text{round}\left(B \times f_{\text{mom}} \times f_{\text{age}} \times f_{\text{chain}}\right)\right)$$
+6. **Launch Plausibility Factor $f_{\text{plaus}}$**: Structural factor mirroring house watchlist logic ($0.10\text{x}$ discount for wrapped, bridged, liquid-staked, or exchange-affiliated products with existing token lineage; $1.00\text{x}$ for primary pre-token protocol primitives).
+7. **Implied Valuation**:
+   $$\text{implied} = \max\left(1,\ \text{round}\left(B \times f_{\text{mom}} \times f_{\text{age}} \times f_{\text{chain}} \times f_{\text{plaus}}\right)\right)$$
 
 Rows are strictly sorted by implied value descending, with deterministic tie-breaking on TVL descending and slug ascending.
 

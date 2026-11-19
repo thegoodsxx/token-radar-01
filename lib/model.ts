@@ -2,12 +2,15 @@
 //
 // Intellectual core:
 // Derives implied protocol valuations dynamically from DefiLlama snapshot data at runtime:
-// 1. Peer multiple M(P): category median mcap/TVL shrunk toward global median with prior weight 6.
+// 1. Peer multiple M(P): category median mcap/TVL shrunk toward global median with prior weight 6,
+//    capped at 3.0x to avoid thin-cohort over-crediting.
 // 2. Base value B = tvl_usd * M(P).
 // 3. Momentum factor: f_mom = clamp(1 + change_7d / 100, 0.5, 2.0).
 // 4. Seasoning factor: f_age = 1 + 0.25 * min(age_days, 1460) / 1460 (up to +25% at 4 years).
 // 5. Chain-breadth factor: f_chain = 1 + 0.05 * min(len(chains) - 1, 6) (up to +30% at 7+ chains).
-// 6. Implied value = round(B * f_mom * f_age * f_chain), minimum 1 whole dollar.
+// 6. Launch-plausibility factor: f_plaus = 0.10 for wrapped, bridged, or exchange products with
+//    existing token lineage; 1.0 for genuine pre-token protocol primitives.
+// 7. Implied value = round(B * f_mom * f_age * f_chain * f_plaus), minimum 1 whole dollar.
 //
 // Farm playbooks:
 // Concrete, costed, timed multi-step strategies instantiated from each protocol's own category,
@@ -39,25 +42,29 @@ export interface Snapshot {
 /** Model configuration constants. */
 export interface ModelConstants {
   shrinkage_prior_weight: number;
+  peer_multiple_cap: number;
   momentum_floor: number;
   momentum_cap: number;
   seasoning_max_days: number;
   seasoning_max_bonus: number;
   breadth_max_chains: number;
   breadth_per_chain: number;
+  plausibility_discount: number;
 }
 
 export const MODEL: ModelConstants = {
   shrinkage_prior_weight: 6,
+  peer_multiple_cap: 3.0,
   momentum_floor: 0.5,
   momentum_cap: 2.0,
   seasoning_max_days: 1460,
   seasoning_max_bonus: 0.25,
   breadth_max_chains: 6,
   breadth_per_chain: 0.05,
+  plausibility_discount: 0.10,
 };
 
-export const MODEL_VERSION = 'radar-2.0-implied-value';
+export const MODEL_VERSION = 'radar-2.1-implied-value';
 
 /** One row of board.json: the ranked board's row. */
 export interface BoardRow {
@@ -82,6 +89,7 @@ export interface BoardRow {
     momentum_factor: number;
     seasoning_factor: number;
     breadth_factor: number;
+    launch_plausibility_factor: number;
     model_note: string;
   };
   farm_steps: string[];
@@ -106,6 +114,7 @@ export interface RadarRow {
   momentum_factor: number;
   seasoning_factor: number;
   breadth_factor: number;
+  launch_plausibility_factor: number;
   model_note: string;
   is_watchlist: boolean;
   farm_steps: string[];
@@ -130,6 +139,7 @@ export interface RadarData {
   floor_usd: number;
   model_version: string;
   global_median_multiple: number;
+  peer_multiple_cap: number;
   category_multiples: Record<string, { median: number; n: number; multiple: number }>;
   watchlist_size: number;
   board_size: number;
@@ -187,24 +197,29 @@ export function slugHash(slug: string): number {
 /**
  * Peer multiple M(P): the median mcap/TVL of tokenized protocols in P's category.
  * Shrinks small category samples toward the global median using Empirical Bayes shrinkage:
- * M = (n * M_cat + 6 * M_global) / (n + 6).
- * Category null or n = 0 falls back to M_global.
+ * M_raw = (n * M_cat + 6 * M_global) / (n + 6).
+ * Hard capped at 3.0x: no launch multiple above 3x TVL is credited because beyond that
+ * the peer set is too thin to believe.
  */
 export function peerMultiple(
   category: string | null,
   catMedians: Map<string, { median: number; n: number }>,
   globalMedian: number,
-  priorWeight: number = MODEL.shrinkage_prior_weight
-): { multiple: number; catMedian: number; n: number } {
+  priorWeight: number = MODEL.shrinkage_prior_weight,
+  cap: number = MODEL.peer_multiple_cap
+): { multiple: number; catMedian: number; n: number; rawMultiple: number } {
   if (!category || !catMedians.has(category)) {
-    return { multiple: globalMedian, catMedian: globalMedian, n: 0 };
+    const raw = globalMedian;
+    return { multiple: Math.min(cap, raw), catMedian: globalMedian, n: 0, rawMultiple: raw };
   }
   const entry = catMedians.get(category)!;
   if (entry.n === 0) {
-    return { multiple: globalMedian, catMedian: globalMedian, n: 0 };
+    const raw = globalMedian;
+    return { multiple: Math.min(cap, raw), catMedian: globalMedian, n: 0, rawMultiple: raw };
   }
-  const multiple = (entry.n * entry.median + priorWeight * globalMedian) / (entry.n + priorWeight);
-  return { multiple, catMedian: entry.median, n: entry.n };
+  const rawMultiple = (entry.n * entry.median + priorWeight * globalMedian) / (entry.n + priorWeight);
+  const multiple = Math.min(cap, rawMultiple);
+  return { multiple, catMedian: entry.median, n: entry.n, rawMultiple };
 }
 
 /**
@@ -239,9 +254,63 @@ export function breadthFactor(chains: string[]): number {
   return 1 + MODEL.breadth_per_chain * Math.min(countAboveOne, MODEL.breadth_max_chains);
 }
 
+const EXCLUDED_CATEGORIES = new Set([
+  'Bridge',
+  'Canonical Bridge',
+  'Liquid Staking',
+  'Liquid Restaking',
+  'Restaked BTC',
+  'CEX',
+]);
+
+const EXCHANGES = ['Binance', 'Coinbase', 'Bybit', 'Kraken', 'Bitget', 'OKX', 'Bitfinex', 'Gemini'];
+const WRAPPED_WORDS = /\b(wrapped|staked|staking)\b/i;
+const VERSION_MARKER = /\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$/;
+
+/**
+ * Structural launch-plausibility factor mirroring house watchlist logic:
+ * A protocol receives factor 0.10 when:
+ * - its category is Bridge, Canonical Bridge, Liquid Staking, Liquid Restaking, Restaked BTC, or CEX;
+ * - OR its name begins with an exchange name (Binance, Coinbase, Bybit, Kraken, Bitget, OKX, Bitfinex, Gemini);
+ * - OR its name carries the whole word wrapped, staked, or staking;
+ * - OR its name ends in a version marker (space + V2/v2/2.0).
+ * Otherwise 1.0 for genuine pre-token protocol primitives.
+ */
+export function launchPlausibility(p: SnapshotProtocol): { factor: number; reason: string | null } {
+  const cat = p.category ?? '';
+  if (EXCLUDED_CATEGORIES.has(cat)) {
+    return {
+      factor: MODEL.plausibility_discount,
+      reason: 'a wrapped or bridged product of a token that already trades — scored as a long shot',
+    };
+  }
+  for (const ex of EXCHANGES) {
+    if (p.name.toLowerCase().startsWith(ex.toLowerCase())) {
+      return {
+        factor: MODEL.plausibility_discount,
+        reason: 'exchange-affiliated product with existing token lineage — scored as a long shot',
+      };
+    }
+  }
+  if (WRAPPED_WORDS.test(p.name)) {
+    return {
+      factor: MODEL.plausibility_discount,
+      reason: 'a wrapped or staked product of a token that already trades — scored as a long shot',
+    };
+  }
+  if (VERSION_MARKER.test(p.name)) {
+    return {
+      factor: MODEL.plausibility_discount,
+      reason: 'versioned pool of an existing protocol — scored as a long shot',
+    };
+  }
+  return { factor: 1.0, reason: null };
+}
+
 /**
  * Evaluates the implied valuation of a pre-token protocol.
- * Combines base peer multiple with momentum, seasoning, and chain breadth factors.
+ * Combines base peer multiple (capped at 3.0x) with momentum, seasoning, chain breadth,
+ * and structural launch plausibility factors.
  */
 export function impliedValue(
   p: SnapshotProtocol,
@@ -257,6 +326,7 @@ export function impliedValue(
   f_mom: number;
   f_age: number;
   f_chain: number;
+  f_plaus: number;
   ageDays: number | null;
   modelNote: string;
 } {
@@ -266,13 +336,17 @@ export function impliedValue(
   const age = ageDays(asOf, p.listed_at);
   const f_age = seasoningFactor(age);
   const f_chain = breadthFactor(p.chains);
-  const implied = Math.max(1, Math.round(base * f_mom * f_age * f_chain));
+  const { factor: f_plaus, reason: plausReason } = launchPlausibility(p);
+  const implied = Math.max(1, Math.round(base * f_mom * f_age * f_chain * f_plaus));
 
   const catLabel = p.category ?? 'Uncategorized';
   const multText = `${M.toFixed(2)}x`;
   const tvlText = formatUsdShort(p.tvl_usd);
   const momPct = p.change_7d !== null ? `${p.change_7d >= 0 ? '+' : ''}${p.change_7d.toFixed(1)}%` : '0.0%';
-  const modelNote = `${catLabel} peer multiple ${multText} on $${tvlText} TVL, ${momPct} 7d momentum`;
+  let modelNote = `${catLabel} peer multiple ${multText} on $${tvlText} TVL, ${momPct} 7d momentum`;
+  if (plausReason) {
+    modelNote += `; ${plausReason}`;
+  }
 
   return {
     implied,
@@ -283,6 +357,7 @@ export function impliedValue(
     f_mom,
     f_age,
     f_chain,
+    f_plaus,
     ageDays: age,
     modelNote,
   };
@@ -552,6 +627,7 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
       momentum_factor: Math.round(s.calc.f_mom * 100) / 100,
       seasoning_factor: Math.round(s.calc.f_age * 100) / 100,
       breadth_factor: Math.round(s.calc.f_chain * 100) / 100,
+      launch_plausibility_factor: Math.round(s.calc.f_plaus * 100) / 100,
       model_note: s.calc.modelNote,
     },
     farm_steps: s.steps,
@@ -576,6 +652,7 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     momentum_factor: Math.round(s.calc.f_mom * 100) / 100,
     seasoning_factor: Math.round(s.calc.f_age * 100) / 100,
     breadth_factor: Math.round(s.calc.f_chain * 100) / 100,
+    launch_plausibility_factor: Math.round(s.calc.f_plaus * 100) / 100,
     model_note: s.calc.modelNote,
     is_watchlist: s.isWatchlist,
     farm_steps: s.steps,
@@ -612,6 +689,7 @@ export function buildRadar(snapshot: Snapshot): { board: BoardRow[]; radar: Rada
     floor_usd: snapshot.floor_usd,
     model_version: MODEL_VERSION,
     global_median_multiple: Math.round(globalMedian * 1000) / 1000,
+    peer_multiple_cap: MODEL.peer_multiple_cap,
     category_multiples: categoryMultiples,
     watchlist_size: snapshot.watchlist.length,
     board_size: board.length,
