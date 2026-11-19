@@ -234,26 +234,18 @@
         el('p', { class: 'summary-desc', text: 'All ' + DATA.board_size + ' protocols recording no token are ranked by dynamic implied market valuation. Implied value derives from snapshot figures (category peer medians with empirical Bayesian shrinkage, 7-day TVL momentum, protocol longevity, and multi-chain breadth).' })
       ),
       el('div', { class: 'stats-grid' },
-        el('div', { class: 'stat-card' },
-          el('span', { class: 'stat-label', text: 'Watchlist Coverage' }),
-          el('b', { class: 'stat-value accent', text: DATA.watchlist_size + ' / ' + DATA.watchlist_size }),
-          el('span', { class: 'stat-note', text: '100% floor coverage' })
-        ),
-        el('div', { class: 'stat-card' },
-          el('span', { class: 'stat-label', text: 'Pre-Token Scored' }),
-          el('b', { class: 'stat-value', text: String(DATA.board_size) }),
-          el('span', { class: 'stat-note', text: 'Records no token' })
-        ),
-        el('div', { class: 'stat-card' },
-          el('span', { class: 'stat-label', text: 'Global Peer Multiple' }),
-          el('b', { class: 'stat-value accent', text: DATA.global_median_multiple.toFixed(3) + 'x' }),
-          el('span', { class: 'stat-note', text: 'Median tokenized mcap/TVL' })
-        ),
-        el('div', { class: 'stat-card' },
-          el('span', { class: 'stat-label', text: 'Live Token Peers' }),
-          el('b', { class: 'stat-value', text: String(DATA.live_size) }),
-          el('span', { class: 'stat-note', text: 'Trading peers set aside' })
-        )
+        [
+          ['Watchlist Coverage', DATA.watchlist_size + ' / ' + DATA.watchlist_size, '100% floor coverage', 'accent'],
+          ['Pre-Token Scored', String(DATA.board_size), 'Records no token', ''],
+          ['Global Peer Multiple', DATA.global_median_multiple.toFixed(3) + 'x', 'Median tokenized mcap/TVL', 'accent'],
+          ['Live Token Peers', String(DATA.live_size), 'Trading peers set aside', '']
+        ].map(function (s) {
+          return el('div', { class: 'stat-card' },
+            el('span', { class: 'stat-label', text: s[0] }),
+            el('b', { class: 'stat-value ' + s[3], text: s[1] }),
+            el('span', { class: 'stat-note', text: s[2] })
+          );
+        })
       )
     );
   }
@@ -428,6 +420,33 @@
     );
   }
 
+  function renderTopMoversStrip() {
+    var top50 = DATA.rows.filter(function (r) {
+      return r.rank <= 50 && r.change_7d !== null;
+    });
+    top50.sort(function (a, b) { return b.change_7d - a.change_7d; });
+    var top5 = top50.slice(0, 5);
+
+    var cards = top5.map(function (r) {
+      var deltaClass = r.change_7d >= 0 ? 'pos-change' : 'neg-change';
+      return el('button', {
+        type: 'button',
+        class: 'top-mover-card',
+        onclick: function () { openDetail(r.slug); },
+        title: 'View ' + r.name + ' detail'
+      },
+        el('span', { class: 'mover-rank', text: '#' + r.rank }),
+        el('span', { class: 'mover-name', text: r.name }),
+        el('span', { class: 'mover-delta ' + deltaClass, text: fmtPct(r.change_7d) })
+      );
+    });
+
+    return el('div', { class: 'top-movers-strip' },
+      el('span', { class: 'top-movers-label', text: 'Top 7d Movers (Top 50):' }),
+      el('div', { class: 'top-movers-items' }, cards)
+    );
+  }
+
   function renderBoardTable() {
     var filtered = filterRows();
     var list = sortRows(filtered);
@@ -493,7 +512,8 @@
           el('div', { class: 'protocol-info' },
             el('div', { class: 'protocol-main' },
               el('span', { class: 'protocol-name', text: r.name }),
-              r.is_watchlist ? el('span', { class: 'watchlist-badge', text: 'Watchlist' }) : null
+              r.is_watchlist ? el('span', { class: 'watchlist-badge', text: 'Watchlist' }) : null,
+              r.launch_plausibility_factor < 1.0 ? el('span', { class: 'longshot-badge', text: 'LONG SHOT' }) : null
             ),
             el('span', { class: 'protocol-slug', text: r.slug })
           )
@@ -627,52 +647,46 @@
         el('p', { class: 'explainer-subtitle', text: 'A deterministic, peer-referenced mathematical model that derives pre-token valuations purely from snapshot metrics.' })
       ),
       el('div', { class: 'explainer-grid' },
-        el('div', { class: 'explainer-card' },
-          el('div', { class: 'step-num', text: '01' }),
-          el('h3', { text: 'Peer Multiple M(P) (Capped at 3.0x)' }),
-          el('p', { text: 'Category median mcap/TVL of tokenized peers shrunk toward the global median (' + DATA.global_median_multiple.toFixed(3) + 'x) via Bayesian prior weighting 6: M = (n·M_cat + 6·M_global) / (n + 6). Capped at 3.0x: no launch multiple above 3x TVL is credited, because beyond that the peer set is too thin to believe.' })
-        ),
-        el('div', { class: 'explainer-card' },
-          el('div', { class: 'step-num', text: '02' }),
-          el('h3', { text: 'Base Valuation' }),
-          el('p', { text: 'Base value B = TVL_usd × M(P). Grounded in the protocol\'s actual locked capital scaled by empirical category valuation standards.' })
-        ),
-        el('div', { class: 'explainer-card' },
-          el('div', { class: 'step-num', text: '03' }),
-          el('h3', { text: 'Momentum Factor' }),
-          el('p', { text: '7-day growth factor f_mom = clamp(1 + change_7d / 100, 0.5, 2.0). Exponential weekly gains or collapses are bounded to preserve structural valuation integrity.' })
-        ),
-        el('div', { class: 'explainer-card' },
-          el('div', { class: 'step-num', text: '04' }),
-          el('h3', { text: 'Seasoning Factor' }),
-          el('p', { text: 'Longevity factor f_age = 1 + 0.25 × min(age_days, 1460) / 1460. Protocols sustaining liquidity over 4 years earn up to +25% survival premium.' })
-        ),
-        el('div', { class: 'explainer-card' },
-          el('div', { class: 'step-num', text: '05' }),
-          el('h3', { text: 'Chain Breadth' }),
-          el('p', { text: 'Multi-chain scaling factor f_chain = 1 + 0.05 × min(len(chains) - 1, 6). Broad cross-chain ecosystems earn up to +30% at 7+ chains.' })
-        ),
-        el('div', { class: 'explainer-card' },
-          el('div', { class: 'step-num', text: '06' }),
-          el('h3', { text: 'Launch Plausibility' }),
-          el('p', { text: 'Structural factor mirroring house watchlist logic: 0.10x for wrapped, bridged, liquid-staked, or exchange-affiliated products with existing token lineage; 1.00x for primary pre-token protocol primitives.' })
-        ),
-        el('div', { class: 'explainer-card' },
-          el('div', { class: 'step-num', text: '07' }),
-          el('h3', { text: 'Implied Valuation' }),
-          el('p', { text: 'implied = round(B × f_mom × f_age × f_chain × f_plaus) in whole USD (minimum $1). Every row is computed deterministically at runtime.' })
-        )
+        [
+          ['01', 'Peer Multiple M(P) (Capped at 3.0x)', 'Category median mcap/TVL of tokenized peers shrunk toward global median (' + DATA.global_median_multiple.toFixed(3) + 'x) via Bayesian prior weighting 6: M = (n·M_cat + 6·M_global) / (n + 6). Capped at 3.0x: no launch multiple above 3x TVL is credited, because beyond that the peer set is too thin to believe.'],
+          ['02', 'Base Valuation', 'Base value B = TVL_usd × M(P). Grounded in protocol locked capital scaled by empirical category valuation standards.'],
+          ['03', 'Momentum Factor', '7-day growth factor f_mom = clamp(1 + change_7d / 100, 0.5, 2.0). Exponential weekly gains or collapses are bounded to preserve structural valuation integrity.'],
+          ['04', 'Seasoning Factor', 'Longevity factor f_age = 1 + 0.25 × min(age_days, 1460) / 1460. Protocols sustaining liquidity over 4 years earn up to +25% survival premium.'],
+          ['05', 'Chain Breadth', 'Multi-chain scaling factor f_chain = 1 + 0.05 × min(len(chains) - 1, 6). Broad cross-chain ecosystems earn up to +30% at 7+ chains.'],
+          ['06', 'Launch Plausibility', 'Structural factor mirroring house watchlist logic: 0.10x for wrapped, bridged, liquid-staked, or exchange-affiliated products with existing token lineage; 1.00x for primary pre-token protocol primitives.'],
+          ['07', 'Implied Valuation', 'implied = round(B × f_mom × f_age × f_chain × f_plaus) in whole USD (minimum $1). Every row is computed deterministically at runtime.']
+        ].map(function (c) {
+          return el('div', { class: 'explainer-card' },
+            el('div', { class: 'step-num', text: c[0] }),
+            el('h3', { text: c[1] }),
+            el('p', { text: c[2] })
+          );
+        })
       ),
       el('div', { class: 'category-multiples-card' },
         el('h3', { class: 'cat-title', text: 'Live Category Valuation Benchmarks (Empirical Multiples)' }),
-        el('div', { class: 'cat-chips-wrap' },
-          catEntries.map(function (item) {
-            return el('div', { class: 'cat-chip' },
-              el('span', { class: 'chip-name', text: item.cat }),
-              el('span', { class: 'chip-mult', text: item.data.multiple.toFixed(2) + 'x' }),
-              el('span', { class: 'chip-meta', text: 'n=' + item.data.n + ' (med ' + item.data.median.toFixed(2) + ')' })
-            );
-          })
+        el('p', { class: 'cat-intro', text: 'Derived directly from 30 live-token peers in this snapshot. Shrunk toward global median (' + DATA.global_median_multiple.toFixed(3) + 'x) via Bayesian weighting; capped at 3.0x ceiling.' }),
+        el('div', { class: 'cat-table-wrap' },
+          el('table', { class: 'cat-median-table' },
+            el('thead', null,
+              el('tr', null,
+                el('th', { scope: 'col', class: 'plain-col' }, 'Category'),
+                el('th', { scope: 'col', class: 'num-col' }, 'Peers (n)'),
+                el('th', { scope: 'col', class: 'num-col' }, 'Category Median'),
+                el('th', { scope: 'col', class: 'num-col' }, 'Effective Multiple M(P)')
+              )
+            ),
+            el('tbody', null,
+              catEntries.map(function (item) {
+                return el('tr', { class: 'cat-tr' },
+                  el('td', { class: 'cat-name-cell' }, item.cat),
+                  el('td', { class: 'num-col' }, 'n=' + item.data.n),
+                  el('td', { class: 'num-col val-mono' }, item.data.median.toFixed(3) + 'x'),
+                  el('td', { class: 'num-col val-mono accent-bright' }, item.data.multiple.toFixed(3) + 'x' + (item.data.multiple >= 3 ? ' (cap)' : ''))
+                );
+              })
+            )
+          )
         )
       )
     );
@@ -707,6 +721,7 @@
         el('div', { class: 'modal-badges' },
           el('span', { class: 'rank-pill', text: 'Rank #' + row.rank + ' of ' + DATA.board_size }),
           row.is_watchlist ? el('span', { class: 'watchlist-pill', text: 'Watchlist Protocol' }) : null,
+          row.launch_plausibility_factor < 1.0 ? el('span', { class: 'longshot-pill', text: 'LONG SHOT' }) : null,
           el('span', { class: 'token-status-pill', text: 'Records No Token' })
         ),
         el('h2', { id: 'detail-modal-title', class: 'modal-title', text: row.name }),
@@ -723,62 +738,63 @@
 
     // Key Figures Grid
     var figuresGrid = el('div', { class: 'modal-figures-grid' },
-      el('div', { class: 'fig-item' },
-        el('span', { class: 'fig-lbl', text: 'Implied Valuation' }),
-        el('b', { class: 'fig-val accent-bright', text: fmtUsdExact(row.implied_value_usd) }),
-        el('span', { class: 'fig-sub', text: fmtUsd(row.implied_value_usd) + ' model total' })
-      ),
-      el('div', { class: 'fig-item' },
-        el('span', { class: 'fig-lbl', text: 'Total Value Locked' }),
-        el('b', { class: 'fig-val', text: fmtUsdExact(row.tvl_usd) }),
-        el('span', { class: 'fig-sub', text: fmtUsd(row.tvl_usd) + ' on-chain' })
-      ),
-      el('div', { class: 'fig-item' },
-        el('span', { class: 'fig-lbl', text: '7-Day TVL Change' }),
-        el('b', { class: 'fig-val ' + (row.change_7d !== null && row.change_7d >= 0 ? 'pos-change' : 'neg-change'), text: fmtPct(row.change_7d) }),
-        el('span', { class: 'fig-sub', text: 'Trailing week delta' })
-      ),
-      el('div', { class: 'fig-item' },
-        el('span', { class: 'fig-lbl', text: 'Age with No Token' }),
-        el('b', { class: 'fig-val', text: fmtAge(row.age_days) }),
-        el('span', { class: 'fig-sub', text: (row.age_days || 0) + ' days tracked' })
-      )
+      [
+        ['Implied Valuation', fmtUsdExact(row.implied_value_usd), fmtUsd(row.implied_value_usd) + ' model total', 'accent-bright'],
+        ['Total Value Locked', fmtUsdExact(row.tvl_usd), fmtUsd(row.tvl_usd) + ' on-chain', ''],
+        ['7-Day TVL Change', fmtPct(row.change_7d), 'Trailing week delta', (row.change_7d !== null && row.change_7d >= 0 ? 'pos-change' : 'neg-change')],
+        ['Age with No Token', fmtAge(row.age_days), (row.age_days || 0) + ' days tracked', '']
+      ].map(function (fig) {
+        return el('div', { class: 'fig-item' },
+          el('span', { class: 'fig-lbl', text: fig[0] }),
+          el('b', { class: 'fig-val ' + fig[3], text: fig[1] }),
+          el('span', { class: 'fig-sub', text: fig[2] })
+        );
+      })
+    );
+
+    // Factor Breakdown ("Why this rank")
+    var factorItems = [
+      ['Peer Multiple', 'vs 3.0x cap', row.peer_multiple.toFixed(3) + 'x', Math.min(100, Math.max(4, Math.round(row.peer_multiple / 3 * 100))), row.peer_multiple >= 3 ? 'bar-gold' : 'bar-signal'],
+      ['Momentum Factor', fmtPct(row.change_7d), row.momentum_factor.toFixed(2) + 'x', Math.min(100, Math.max(4, Math.round((row.momentum_factor - 0.5) / 1.5 * 100))), row.momentum_factor >= 1 ? 'bar-pos' : 'bar-neg'],
+      ['Seasoning Factor', fmtAge(row.age_days), row.seasoning_factor.toFixed(2) + 'x', Math.min(100, Math.max(4, Math.round(row.seasoning_factor / 1.25 * 100))), 'bar-signal'],
+      ['Chain Breadth', (row.chains ? row.chains.length : 1) + ' chain(s)', row.breadth_factor.toFixed(2) + 'x', Math.min(100, Math.max(4, Math.round(row.breadth_factor / 1.3 * 100))), 'bar-signal'],
+      ['Launch Plausibility', row.launch_plausibility_factor < 1 ? 'discounted long shot' : 'full plausibility', row.launch_plausibility_factor.toFixed(2) + 'x', Math.min(100, Math.max(4, Math.round(row.launch_plausibility_factor * 100))), row.launch_plausibility_factor < 1 ? 'bar-neg' : 'bar-signal']
+    ];
+
+    var factorBarsEl = el('div', { class: 'factor-bars-wrap' },
+      factorItems.map(function (f) {
+        return el('div', { class: 'factor-bar-row' },
+          el('div', { class: 'factor-bar-meta' },
+            el('span', { class: 'factor-bar-title', text: f[0] }),
+            el('span', { class: 'factor-bar-sub', text: f[1] }),
+            el('span', { class: 'factor-bar-num val-mono', text: f[2] })
+          ),
+          el('div', { class: 'factor-track' },
+            el('div', { class: 'factor-fill ' + f[4], style: 'width:' + f[3] + '%' })
+          )
+        );
+      })
     );
 
     // Valuation Breakdown Section
     var modelCard = el('div', { class: 'modal-section' },
-      el('h3', { class: 'section-title', text: 'Model Valuation Breakdown' }),
+      el('h3', { class: 'section-title', text: 'Why this rank: Factor Breakdown' }),
+      factorBarsEl,
       el('div', { class: 'breakdown-box' },
-        el('div', { class: 'breakdown-row' },
-          el('span', { class: 'br-name', text: 'Peer Multiple M(P)' }),
-          el('span', { class: 'br-val val-mono accent-bright', text: row.peer_multiple.toFixed(3) + 'x' }),
-          el('span', { class: 'br-desc', text: (row.category || 'Category') + ' median (' + row.category_median.toFixed(3) + 'x, n=' + row.category_peers_count + ') shrunk to global (' + DATA.global_median_multiple.toFixed(3) + 'x)' + (row.peer_multiple >= 3.0 ? ' [Capped at 3.0x max ceiling]' : '') })
-        ),
-        el('div', { class: 'breakdown-row' },
-          el('span', { class: 'br-name', text: 'Base Value (TVL × M)' }),
-          el('span', { class: 'br-val val-mono', text: fmtUsd(row.tvl_usd * row.peer_multiple) }),
-          el('span', { class: 'br-desc', text: fmtUsd(row.tvl_usd) + ' TVL × ' + row.peer_multiple.toFixed(3) + 'x' })
-        ),
-        el('div', { class: 'breakdown-row' },
-          el('span', { class: 'br-name', text: 'Momentum Factor (f_mom)' }),
-          el('span', { class: 'br-val val-mono', text: row.momentum_factor.toFixed(2) + 'x' }),
-          el('span', { class: 'br-desc', text: 'Clamped factor from 7d change ' + fmtPct(row.change_7d) })
-        ),
-        el('div', { class: 'breakdown-row' },
-          el('span', { class: 'br-name', text: 'Seasoning Factor (f_age)' }),
-          el('span', { class: 'br-val val-mono', text: row.seasoning_factor.toFixed(2) + 'x' }),
-          el('span', { class: 'br-desc', text: 'Longevity multiplier from ' + (row.age_days || 0) + ' days seasoning' })
-        ),
-        el('div', { class: 'breakdown-row' },
-          el('span', { class: 'br-name', text: 'Chain Breadth Factor (f_chain)' }),
-          el('span', { class: 'br-val val-mono', text: row.breadth_factor.toFixed(2) + 'x' }),
-          el('span', { class: 'br-desc', text: (row.chains ? row.chains.length : 1) + ' active deployment chain(s)' })
-        ),
-        el('div', { class: 'breakdown-row' },
-          el('span', { class: 'br-name', text: 'Launch Plausibility (f_plaus)' }),
-          el('span', { class: 'br-val val-mono' + (row.launch_plausibility_factor < 1.0 ? ' neg-change' : ' accent-bright'), text: row.launch_plausibility_factor.toFixed(2) + 'x' }),
-          el('span', { class: 'br-desc', text: row.launch_plausibility_factor < 1.0 ? '0.10x long-shot factor (wrapped, bridged, or exchange lineage)' : '1.00x full plausibility (primary pre-token protocol)' })
-        ),
+        [
+          ['Peer Multiple M(P)', row.peer_multiple.toFixed(3) + 'x', (row.category || 'Category') + ' median (' + row.category_median.toFixed(3) + 'x, n=' + row.category_peers_count + ') shrunk to global (' + DATA.global_median_multiple.toFixed(3) + 'x)' + (row.peer_multiple >= 3 ? ' [Capped at 3.0x max ceiling]' : ''), 'accent-bright'],
+          ['Base Value (TVL × M)', fmtUsd(row.tvl_usd * row.peer_multiple), fmtUsd(row.tvl_usd) + ' TVL × ' + row.peer_multiple.toFixed(3) + 'x', ''],
+          ['Momentum Factor (f_mom)', row.momentum_factor.toFixed(2) + 'x', 'Clamped factor from 7d change ' + fmtPct(row.change_7d), ''],
+          ['Seasoning Factor (f_age)', row.seasoning_factor.toFixed(2) + 'x', 'Longevity multiplier from ' + (row.age_days || 0) + ' days seasoning', ''],
+          ['Chain Breadth Factor (f_chain)', row.breadth_factor.toFixed(2) + 'x', (row.chains ? row.chains.length : 1) + ' active deployment chain(s)', ''],
+          ['Launch Plausibility (f_plaus)', row.launch_plausibility_factor.toFixed(2) + 'x', row.launch_plausibility_factor < 1 ? '0.10x long-shot factor (wrapped, bridged, or exchange lineage)' : '1.00x full plausibility (primary pre-token protocol)', row.launch_plausibility_factor < 1 ? 'neg-change' : 'accent-bright']
+        ].map(function (b) {
+          return el('div', { class: 'breakdown-row' },
+            el('span', { class: 'br-name', text: b[0] }),
+            el('span', { class: 'br-val val-mono ' + b[3], text: b[1] }),
+            el('span', { class: 'br-desc', text: b[2] })
+          );
+        }),
         el('div', { class: 'model-note-callout' },
           el('span', { class: 'note-tag', text: 'Model Summary:' }),
           el('span', { class: 'note-text', text: row.model_note })
@@ -851,6 +867,7 @@
       renderHeader(),
       renderLede(),
       renderControls(),
+      state.tab === 'pre-token' ? renderTopMoversStrip() : null,
       state.tab === 'pre-token' ? renderBoardTable() : renderLiveTable(),
       state.tab === 'pre-token' ? renderModelExplainer() : null
     );
