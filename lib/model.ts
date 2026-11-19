@@ -363,177 +363,115 @@ export function impliedValue(
   };
 }
 
-// ---------------------------------------------------------------- Farm Playbooks
+// ---------------------------------------------------------------- Farm Playbooks v2
 
 interface CapitalTierInfo {
-  tierName: string;
-  suggestedShare: string;
-  positionUsd: string;
-  depositAmount: number;
-  gasTier: 'high' | 'mid' | 'low';
+  sizeText: string;
+  reason: string;
 }
 
-function getCapitalTier(tvl: number): CapitalTierInfo {
-  if (tvl >= 1_000_000_000) {
+function getCapitalTierV2(tvl: number): CapitalTierInfo {
+  if (tvl >= 500_000_000) {
     return {
-      tierName: '$100k farm portfolio tier',
-      suggestedShare: '2.5% - 5.0% wallet share',
-      positionUsd: '$2,500 - $5,000',
-      depositAmount: 3500,
-      gasTier: 'high',
+      sizeText: '$5,000-$25,000',
+      reason: 'institutional-tier TVL (over $500M) to unlock top-tier reward brackets across deep liquidity without moving daily pool depth',
     };
   }
-  if (tvl >= 100_000_000) {
+  if (tvl >= 50_000_000) {
     return {
-      tierName: '$10k farm portfolio tier',
-      suggestedShare: '5.0% - 10.0% wallet share',
-      positionUsd: '$500 - $1,000',
-      depositAmount: 750,
-      gasTier: 'mid',
+      sizeText: '$1,000-$5,000',
+      reason: 'meaningful share of daily flow without disturbing pool equilibrium across $50M-$500M TVL',
     };
   }
   return {
-    tierName: '$1k farm portfolio tier',
-    suggestedShare: '5.0% - 10.0% wallet share',
-    positionUsd: '$50 - $100',
-    depositAmount: 75,
-    gasTier: 'low',
+    sizeText: '$250-$1,000',
+    reason: 'meaningful entry for sub-$50M TVL depth without causing adverse price impact or slippage',
   };
 }
 
-function chainSurface(chains: string[]): string {
-  if (!chains || chains.length === 0) return 'its primary deployment chain';
-  if (chains.length === 1) return chains[0]!;
-  if (chains.length === 2) return `${chains[0]} or ${chains[1]}`;
-  return `${chains[0]}, ${chains[1]}, or ${chains[2]}`;
-}
-
-function gasCostEstimate(chains: string[], gasTier: 'high' | 'mid' | 'low'): string {
-  const c = chains.join(' ').toLowerCase();
-  if (c.includes('ethereum')) {
-    return gasTier === 'high' ? '$20 - $45 in ETH gas' : gasTier === 'mid' ? '$12 - $25 in ETH gas' : '$6 - $14 in ETH gas';
-  }
-  if (c.includes('solana')) {
-    return '<$0.02 in SOL network fees';
-  }
-  if (c.includes('arbitrum') || c.includes('base') || c.includes('optimism') || c.includes('polygon') || c.includes('avalanche') || c.includes('bsc') || c.includes('blast')) {
-    return '$0.15 - $0.85 in native gas';
-  }
-  return '$1 - $5 in network gas';
+/** Accurately quotes gas cost estimates based on the specific chain class. */
+export function gasCostFor(chain: string): string {
+  const c = (chain || '').toLowerCase();
+  if (c.includes('ethereum') || c.includes('mainnet')) return '$5-$25 in ETH gas';
+  if (/arbitrum|base|optimism|ink|blast|linea|scroll|zksync|polygon|boba|mantle/.test(c)) return '$0.05-$0.50 in L2 gas';
+  return '$0.10-$2.00 in network fees';
 }
 
 /**
- * Builds concrete, costed, and timed farm steps customized for the protocol.
- * Conforms strictly to 3..12 steps and 20..600 characters each.
+ * Builds concrete, costed, and timed farm steps customized for the protocol (Farm Plans v2).
+ * Strictly anchored to this protocol's own facts:
+ * - Primary chain (chains[0]) and secondary chain rotation (chains[1] if 2+ chains) vs single-chain depth.
+ * - Explicit TVL-tier dollar position sizing and market depth reasoning.
+ * - Exact gas cost quotes per chain class.
+ * - Weekly time budget line (e.g. "Budget 20 minutes a week...") and recurring cadence action.
+ * - Momentum-aware caution (surge >= +10% or contraction <= -10%).
+ * Conforms strictly to 5..6 steps and 20..600 characters each.
  */
 export function generateFarmSteps(p: SnapshotProtocol, age: number | null): string[] {
-  const hash = slugHash(p.slug);
-  const chainsText = chainSurface(p.chains);
-  const tier = getCapitalTier(p.tvl_usd);
-  const gas = gasCostEstimate(p.chains, tier.gasTier);
+  const chains = p.chains && p.chains.length > 0 ? p.chains : ['its primary network'];
+  const primaryChain = chains[0]!;
+  const secondChain = chains.length >= 2 ? chains[1]! : null;
+  const primaryGas = gasCostFor(primaryChain);
+  const secondGas = secondChain ? gasCostFor(secondChain) : primaryGas;
+  const tier = getCapitalTierV2(p.tvl_usd);
   const holdDays = age === null ? 35 : age < 180 ? 60 : age < 365 ? 45 : 30;
   const cat = (p.category ?? '').toLowerCase();
 
-  const openers = [
-    'Work the protocol core product directly on',
-    'Deploy capital directly via verified contracts on',
-    'Establish an active on-chain presence on',
-    'Execute structured interactions through',
-  ];
-  const opener = openers[hash % openers.length]!;
-
-  let steps: string[] = [];
-
-  if (cat.includes('dex')) {
-    steps = [
-      `Fund a dedicated farming wallet on ${chainsText} with ${tier.positionUsd} (${tier.suggestedShare} for ${tier.tierName}). Cost: ${gas}. Time: 10 minutes setup.`,
-      `${opener} ${chainsText}: deposit ${tier.positionUsd} into ${p.name}'s highest-volume pools (such as native token / USDC) to establish an authentic liquidity record. Cost: capital lock plus ${gas}. Time: 15 minutes.`,
-      `Maintain regular volume routing: execute 2 to 3 organic swaps ($25 - $75 volume) each week through ${p.name} on ${chainsText} to ensure continuous user activity. Cost: under $2 gas weekly. Time: 5 minutes weekly.`,
-      `Keep liquidity committed for at least ${holdDays} days to ensure qualification across multiple snapshot cycles. Cost: capital lock of ${tier.positionUsd}. Time: ${holdDays} days seasoning.`,
-      `Monitor official points dashboards and volume stats weekly; avoid unauthorized claiming links, then unwind positions gradually to avoid price impact. Cost: ${gas} to unwind. Time: 10 minutes.`,
-    ];
-  } else if (cat.includes('lend') || cat.includes('borrow')) {
-    steps = [
-      `Allocate ${tier.positionUsd} from ${tier.tierName} (${tier.suggestedShare}) to ${p.name} on ${chainsText}. Cost: ${gas}. Time: 10 minutes wallet preparation.`,
-      `${opener} ${chainsText}: supply ${tier.positionUsd} of stable collateral (USDC/USDT) into ${p.name}'s core money market. Cost: capital locked plus ${gas}. Time: 15 minutes execution.`,
-      `Borrow a conservative 25% to 35% against your supplied collateral on ${chainsText} to activate borrower reward tiers while keeping a safe health factor above 2.0x. Cost: borrow APY plus ${gas}. Time: 10 minutes.`,
-      `Maintain active supply and borrow positions for at least ${holdDays} days, checking liquidation buffers and utilization rates weekly. Cost: net interest spread. Time: ${holdDays} days hold.`,
-      `Repay outstanding loans, claim accrued protocol rewards from official interfaces, and withdraw supplied principal safely. Cost: ${gas} settlement. Time: 10 minutes.`,
-    ];
-  } else if (cat.includes('liquid staking') || cat.includes('restak') || cat.includes('staking pool')) {
-    steps = [
-      `Prepare ${tier.positionUsd} (${tier.suggestedShare} of ${tier.tierName}) in native assets on ${chainsText}. Cost: ${gas}. Time: 10 minutes setup.`,
-      `${opener} ${chainsText}: stake native assets via ${p.name}'s protocol contracts to mint liquid staking receipt tokens. Cost: capital committed plus ${gas}. Time: 15 minutes.`,
-      `Deploy minted liquid staking tokens into secondary DeFi integrations on ${chainsText} (such as liquidity pools or money markets) to compound protocol loyalty score. Cost: ${gas}. Time: 15 minutes.`,
-      `Retain the staked receipt balance for at least ${holdDays} days without unstaking, ensuring eligibility across snapshot windows. Cost: capital locked in receipt token. Time: ${holdDays} days duration.`,
-      `Review unstaking queue times and redemption fees; unstake through ${p.name}'s official portal or swap receipt tokens on market. Cost: ${gas} unstaking fee. Time: 15 minutes.`,
-    ];
-  } else if (cat.includes('bridge')) {
-    steps = [
-      `Designate ${tier.positionUsd} (${tier.suggestedShare} for ${tier.tierName}) on ${chainsText} for cross-chain activity. Cost: ${gas}. Time: 10 minutes wallet preparation.`,
-      `${opener} ${chainsText}: bridge ${tier.positionUsd} across ${chainsText} using ${p.name}'s cross-chain routing contracts to log initial transaction hashes. Cost: bridge fee plus ${gas}. Time: 15 minutes.`,
-      `Conduct bi-weekly bridging transactions of $30 - $70 between supported chains to accumulate consistent volume and diverse network interactions. Cost: standard bridge fee and gas. Time: 10 minutes bi-weekly.`,
-      `Retain bridged funds on the destination chain for at least ${holdDays} days to demonstrate genuine liquidity migration rather than immediate round-trip laundering. Cost: funds active on destination. Time: ${holdDays} days.`,
-      `Log transaction IDs in a farm journal and monitor official verification portals for qualifying score updates before unwinding funds. Cost: ${gas} exit fee. Time: 10 minutes.`,
-    ];
-  } else if (cat.includes('yield') || cat.includes('farm') || cat.includes('aggregator')) {
-    steps = [
-      `Commit ${tier.positionUsd} (${tier.suggestedShare} from ${tier.tierName}) to ${p.name} on ${chainsText}. Cost: ${gas}. Time: 10 minutes setup.`,
-      `${opener} ${chainsText}: deposit ${tier.positionUsd} into ${p.name}'s automated compounding vaults or risk-adjusted yield strategies. Cost: capital lock plus ${gas}. Time: 15 minutes deposit.`,
-      `Trigger weekly contract interactions by rebalancing vault allocations or compounding strategy rewards on ${chainsText}. Cost: negligible gas. Time: 5 minutes weekly.`,
-      `Keep vault positions staked continuously for ${holdDays} days to satisfy long-term retention requirements across yield epochs. Cost: strategy performance fee. Time: ${holdDays} days hold.`,
-      `Check withdrawal cooldown schedules, initiate orderly vault exit via ${p.name}, and repatriate funds to your primary wallet. Cost: ${gas}. Time: 10 minutes.`,
-    ];
-  } else if (cat.includes('rwa')) {
-    steps = [
-      `Prepare ${tier.positionUsd} (${tier.suggestedShare} in ${tier.tierName}) on ${chainsText}. Complete necessary wallet accreditation or KYC requirements if applicable. Cost: ${gas}. Time: 15 minutes setup.`,
-      `${opener} ${chainsText}: mint or purchase tokenized real-world assets (treasuries or institutional yield instruments) via ${p.name}. Cost: capital lock plus ${gas}. Time: 20 minutes execution.`,
-      `Utilize tokenized RWA shares across approved on-chain secondary integrations or collateral vaults on ${chainsText} to maximize capital efficiency. Cost: ${gas}. Time: 15 minutes.`,
-      `Hold the tokenized asset position for a minimum of ${holdDays} days to log continuous time-weighted participation on-chain. Cost: custody fee if applicable. Time: ${holdDays} days duration.`,
-      `Redeem tokenized assets through ${p.name}'s settlement contracts or secondary liquidity, archiving all transaction receipts. Cost: redemption fee and ${gas}. Time: 15 minutes.`,
-    ];
-  } else if (cat.includes('cex')) {
-    steps = [
-      `Allocate ${tier.positionUsd} (${tier.tierName}) to interact with ${p.name}'s Web3 on-chain infrastructure on ${chainsText}. Cost: ${gas}. Time: 10 minutes setup.`,
-      `${opener} ${chainsText}: execute on-chain smart contract interactions and verify wallet link with ${p.name}'s decentralized ecosystem. Cost: ${gas}. Time: 15 minutes.`,
-      `Route regular weekly trading and swap flow ($25 - $50) through ${p.name}'s on-chain decentralized router across ${chainsText}. Cost: trading fee plus ${gas}. Time: 10 minutes weekly.`,
-      `Maintain positive asset balances inside ${p.name}'s on-chain smart contracts for ${holdDays} days to meet continuous user thresholds. Cost: asset lock. Time: ${holdDays} days hold.`,
-      `Review eligibility status on ${p.name}'s official analytics portal; unwind positions and transfer balances to cold storage. Cost: ${gas}. Time: 10 minutes.`,
-    ];
-  } else if (cat.includes('curator')) {
-    steps = [
-      `Allocate ${tier.positionUsd} (${tier.suggestedShare} of ${tier.tierName}) to vaults curated by ${p.name} on ${chainsText}. Cost: ${gas}. Time: 10 minutes preparation.`,
-      `${opener} ${chainsText}: supply capital into risk-managed vaults curated by ${p.name} to earn curated base yield and loyalty credit. Cost: capital lock plus ${gas}. Time: 15 minutes.`,
-      `Review curator risk reports and periodic rebalancing updates weekly, adjusting vault selections on ${chainsText} if market parameters change. Cost: minimal gas. Time: 10 minutes weekly.`,
-      `Commit funds to the curated vault for at least ${holdDays} days to accrue time-weighted curator score across lending cycles. Cost: vault management fee. Time: ${holdDays} days hold.`,
-      `Initiate vault share redemption via ${p.name}, verify accrued interest payout, and return capital to safe storage. Cost: ${gas} exit fee. Time: 10 minutes.`,
-    ];
-  } else if (cat.includes('allocator')) {
-    steps = [
-      `Commit ${tier.positionUsd} (${tier.suggestedShare} from ${tier.tierName}) to ${p.name} on ${chainsText}. Cost: ${gas}. Time: 10 minutes onboarding.`,
-      `${opener} ${chainsText}: deposit ${tier.positionUsd} into ${p.name}'s programmatic allocation strategies across integrated protocols. Cost: capital lock plus ${gas}. Time: 15 minutes execution.`,
-      `Monitor automated allocation rebalances weekly on ${chainsText}; participate in strategy governance or parameter polls where supported. Cost: negligible gas. Time: 5 minutes weekly.`,
-      `Maintain allocated capital for at least ${holdDays} days to qualify across epoch distribution snapshots. Cost: allocation performance fee. Time: ${holdDays} days hold.`,
-      `Submit orderly withdrawal request, allow allocation rebalance cycle to complete, and claim underlying assets on ${chainsText}. Cost: ${gas}. Time: 10 minutes.`,
-    ];
-  } else if (cat.includes('basis') || cat.includes('derivative') || cat.includes('perpetual')) {
-    steps = [
-      `Allocate ${tier.positionUsd} (${tier.tierName}) to ${p.name} on ${chainsText} for delta-neutral basis farming. Cost: ${gas}. Time: 10 minutes setup.`,
-      `${opener} ${chainsText}: deposit margin and establish a delta-neutral basis trade (spot long combined with short perpetual hedge) on ${p.name}. Cost: trading fee plus ${gas}. Time: 20 minutes.`,
-      `Check funding rate spreads weekly; rebalance hedge ratios on ${chainsText} to maintain zero net directional market risk. Cost: small rebalancing fee. Time: 10 minutes weekly.`,
-      `Keep the basis position open for at least ${holdDays} days to capture continuous funding cash flows and trading volume credentials. Cost: margin capital lock. Time: ${holdDays} days hold.`,
-      `Close the derivative hedge and spot position simultaneously on ${chainsText}, locking in funding returns and reclaiming margin. Cost: closing fee plus ${gas}. Time: 15 minutes.`,
-    ];
+  // Step 1: Capital sizing & momentum-aware entry strategy
+  let step1 = '';
+  if (p.change_7d !== null && p.change_7d >= 10) {
+    step1 = `Target position size ${tier.sizeText} (${tier.reason}). Note 7d inflow surge (+${p.change_7d.toFixed(1)}%): enter in 2-3 tranches over 10 days rather than a single lump sum to avoid chasing transient market momentum. Cost: ${primaryGas} per tranche. Time: 15 minutes setup.`;
+  } else if (p.change_7d !== null && p.change_7d <= -10) {
+    step1 = `Target position size ${tier.sizeText} (${tier.reason}). Note 7d TVL contraction (${p.change_7d.toFixed(1)}%): audit protocol smart contract outflows, pool solvency, and recent security disclosures before committing capital. Cost: no fee to verify. Time: 25 minutes due diligence.`;
   } else {
-    // Generic fallback playbook
-    steps = [
-      `Allocate ${tier.positionUsd} (${tier.suggestedShare} of ${tier.tierName}) to ${p.name} on ${chainsText}. Cost: ${gas}. Time: 10 minutes preparation.`,
-      `${opener} ${chainsText}: deposit ${tier.positionUsd} into ${p.name}'s primary smart contracts to establish early qualifying activity. Cost: capital lock plus ${gas}. Time: 15 minutes.`,
-      `Execute 1 to 2 qualifying protocol actions weekly on ${chainsText} (such as balance check, micro-transaction, or community vote). Cost: under $1 gas weekly. Time: 5 minutes weekly.`,
-      `Maintain the active protocol balance for ${holdDays} days to satisfy long-term retention rules across multiple snapshot dates. Cost: capital committed. Time: ${holdDays} days hold.`,
-      `Audit points balance on ${p.name}'s official interface, submit standard withdrawal transaction, and reclaim capital safely. Cost: ${gas}. Time: 10 minutes.`,
-    ];
+    const deltaStr = p.change_7d !== null ? (p.change_7d >= 0 ? '+' : '') + p.change_7d.toFixed(1) + '%' : 'neutral';
+    step1 = `Target position size ${tier.sizeText} (${tier.reason}). With steady 7d TVL momentum (${deltaStr}), deploy initial allocation directly onto ${primaryChain}. Cost: ${primaryGas}. Time: 15 minutes setup.`;
   }
+
+  // Step 2: Core product execution on primaryChain anchored to category playbook
+  let step2 = '';
+  if (cat.includes('dex')) {
+    step2 = `Work ${p.name}'s core AMM liquidity pools on ${primaryChain}: supply ${tier.sizeText} into dominant volume trading pairs (e.g. native gas token / USDC) with tight fee tiers to capture qualifying trade fee volume. Cost: capital lock plus ${primaryGas}. Time: 20 minutes execution.`;
+  } else if (cat.includes('lend') || cat.includes('borrow')) {
+    step2 = `Work ${p.name}'s lending markets on ${primaryChain}: supply ${tier.sizeText} of high-quality collateral (USDC or native token), then maintain a conservative borrow ratio under 35% to activate borrower reward multipliers safely above 2.0x health factor. Cost: ${primaryGas}. Time: 20 minutes execution.`;
+  } else if (cat.includes('liquid staking') || cat.includes('restak') || cat.includes('staking pool')) {
+    step2 = `Work ${p.name}'s staking infrastructure on ${primaryChain}: stake native assets to mint the protocol receipt token, logging non-custodial staking credentials on-chain. Cost: ${primaryGas}. Time: 15 minutes execution.`;
+  } else if (cat.includes('bridge')) {
+    step2 = `Work ${p.name}'s bridging contracts: bridge ${tier.sizeText} from ${primaryChain} to establish verifiable cross-chain messaging proofs and logging active source-destination addresses. Cost: bridge protocol fee plus ${primaryGas}. Time: 15 minutes execution.`;
+  } else if (cat.includes('yield') || cat.includes('farm') || cat.includes('aggregator')) {
+    step2 = `Work ${p.name}'s automated yield vaults on ${primaryChain}: deposit ${tier.sizeText} into verified auto-compounding strategies to start accruing time-weighted vault shares. Cost: ${primaryGas}. Time: 15 minutes execution.`;
+  } else if (cat.includes('rwa')) {
+    step2 = `Work ${p.name}'s asset portal on ${primaryChain}: mint or purchase ${tier.sizeText} in tokenized real-world yield assets, completing any required on-chain accreditation verification. Cost: ${primaryGas}. Time: 25 minutes execution.`;
+  } else if (cat.includes('cex')) {
+    step2 = `Work ${p.name}'s on-chain Web3 portal on ${primaryChain}: deposit ${tier.sizeText} and route transactions through its decentralized exchange or smart contract ecosystem. Cost: ${primaryGas}. Time: 15 minutes execution.`;
+  } else if (cat.includes('curator')) {
+    step2 = `Work curated vaults managed by ${p.name} on ${primaryChain}: allocate ${tier.sizeText} directly into curated risk facilities to earn curated base yield and time-weighted curator score. Cost: ${primaryGas}. Time: 20 minutes execution.`;
+  } else if (cat.includes('allocator')) {
+    step2 = `Work ${p.name}'s programmatic vaults on ${primaryChain}: allocate ${tier.sizeText} into autonomous strategy pools to participate in protocol yield allocation epochs. Cost: ${primaryGas}. Time: 20 minutes execution.`;
+  } else if (cat.includes('basis') || cat.includes('derivative') || cat.includes('perpetual')) {
+    step2 = `Work ${p.name}'s perpetual trading markets on ${primaryChain}: deposit ${tier.sizeText} margin and establish a delta-neutral basis position (spot long vs perpetual short) to harvest funding yield. Cost: trading fee plus ${primaryGas}. Time: 20 minutes execution.`;
+  } else {
+    step2 = `Work ${p.name}'s primary smart contracts on ${primaryChain}: deposit ${tier.sizeText} into core protocol modules to establish early on-chain participation records. Cost: capital lock plus ${primaryGas}. Time: 15 minutes execution.`;
+  }
+
+  // Step 3: Multi-chain rotation (2+ chains) OR single-chain concentration (1 chain)
+  let step3 = '';
+  if (secondChain) {
+    step3 = `Cross-chain rotation: bridge and deploy a 25%-35% slice of your ${p.name} allocation over to ${secondChain} via official cross-chain routes to establish qualifying footprint on multiple networks. Cost: ${secondGas}. Time: 15 minutes.`;
+  } else {
+    step3 = `Single-chain concentration: because ${p.name} deploys solely on ${primaryChain}, concentrate participation depth by supplying secondary pool liquidity or staking your protocol receipt tokens into partner integrations. Cost: ${primaryGas}. Time: 15 minutes.`;
+  }
+
+  // Step 4: Weekly time budget and recurring cadence action
+  const step4 = `Budget 20 minutes a week for active account hygiene: check collateral health factor, rebalance liquidity ranges, or cast governance votes on ${primaryChain}. Consistent weekly cadence signals genuine user retention rather than automated sybil farming. Cost: under $1 in routine gas. Time: 20 minutes weekly.`;
+
+  // Step 5: Seasoning holding period across snapshot epochs
+  const step5 = `Maintain active on-chain contract state for at least ${holdDays} days across multiple snapshot epochs. Younger protocols require extended observation to prove authentic retention before unwinding. Cost: capital remains committed in position. Time: ${holdDays} days holding period.`;
+
+  // Step 6: Claim and safe exit verification
+  const step6 = `Audit accumulated points, accrued yield, or airdrop eligibility metrics exclusively via ${p.name}'s official verified portal. Avoid phishing claims, then unwind liquidity and repay borrows in reverse order of entry. Cost: ${primaryGas} settlement fee. Time: 15 minutes orderly exit.`;
+
+  const steps = [step1, step2, step3, step4, step5, step6];
 
   // Validate every step meets gate constraints: 20..600 characters trimmed
   for (let i = 0; i < steps.length; i++) {
